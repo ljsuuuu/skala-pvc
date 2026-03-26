@@ -61,3 +61,4 @@ jobs:
           echo "✔ CI Process Completed."
           echo "✔ Frontend Image: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ github.sha }}"
           echo "✔ Backend Image: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }}"
+          
