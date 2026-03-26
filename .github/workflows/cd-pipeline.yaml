@@ -1,0 +1,63 @@
+name: CD Pipeline for Gallery App
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline for Gallery App"]
+    types:
+      - completed
+
+env:
+  REGISTRY: ${{ secrets.HARBOR_URL }}
+  FRONTEND_IMAGE: skala26a-ai1/a3021_vue
+  BACKEND_IMAGE: skala26a-ai1/a3021_node
+
+jobs:
+  deploy-to-k8s:
+    name: Deploy to K8s
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-2
+
+      - name: Set up Kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: "latest"
+
+      - name: Configure Kubernetes Credentials
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      - name: Update Deployment YAML and Apply
+        run: |
+          COMMIT_SHA=${{ github.event.workflow_run.head_sha }}
+
+          # 프론트엔드 이미지 태그 업데이트
+          sed -i "s|image: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}.*|image: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${COMMIT_SHA}|g" k8s/frontend-deployment.yaml
+          
+          # 백엔드 이미지 태그 업데이트
+          sed -i "s|image: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}.*|image: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${COMMIT_SHA}|g" k8s/backend-deployment.yaml
+
+          # K8s 폴더의 모든 리소스(PVC, Frontend, Backend) 일괄 배포
+          kubectl apply -f k8s/
+
+          # 두 개의 파드가 모두 정상적으로 롤아웃 될 때까지 대기
+          kubectl rollout status deployment/sk3021-frontend -n skala3-ai1
+          kubectl rollout status deployment/sk3021-backend -n skala3-ai1
+
+      - name: CD Summary
+        run: |
+          echo "✔ CD Process Completed successfully."
