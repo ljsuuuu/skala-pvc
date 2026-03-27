@@ -21,10 +21,16 @@
         오른쪽에서 첫 번째 이미지를 업로드해 보세요!
       </div>
 
-      <div v-else class="grid-container">
+      <transition-group 
+        v-else 
+        appear
+        name="fade-slide" 
+        tag="div" 
+        class="grid-container"
+      >
         <div 
           v-for="(item, index) in images" 
-          :key="index" 
+          :key="item.imageUrl" 
           class="image-card"
           :class="{ 'is-delete-mode': isDeleteMode }"
           @click="handleImageClick(index, item)"
@@ -35,7 +41,7 @@
           </div>
           <div class="image-title">{{ item.title }}</div>
         </div>
-      </div>
+      </transition-group>
     </div>
 
     <div class="upload-section">
@@ -82,7 +88,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+// 🚀 nextTick 추가
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 
 const images = ref([]); 
 const uploadTitle = ref('');
@@ -91,41 +98,37 @@ const selectedFile = ref(null);
 const previewImageUrl = ref(null);
 const isUploading = ref(false);
 
-// 새로운 상태 관리 로직
-const focusedIndex = ref(null); // 현재 클릭해서 크게 보는 이미지 인덱스
+const focusedIndex = ref(null); 
 const isDeleteMode = ref(false);
+let pollingInterval = null; 
 
-// 1. 이미지 불러오기
 const fetchImages = async () => {
   try {
     const response = await fetch('/api/images');
     if (response.ok) {
-      images.value = await response.json();
+      const newData = await response.json();
+      if (images.value.length !== newData.length) {
+        images.value = newData;
+      }
     }
   } catch (error) {
     console.error('이미지 목록을 불러오는데 실패했습니다.', error);
   }
 };
 
-// 🚀 2. 단축키 충돌 해결 (Cmd/Ctrl + Shift + Y)
 const handleKeyDown = (e) => {
   const isCmdOrCtrl = e.ctrlKey || e.metaKey; 
-  
   if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'y') {
     e.preventDefault(); 
     isDeleteMode.value = !isDeleteMode.value; 
-    
-    // 삭제 모드를 켰을 때, 열려있는 큰 화면이 있다면 닫기
     if (isDeleteMode.value) {
       closeFocus();
     }
   }
 };
 
-// 🚀 3. 이미지 클릭 로직 (모드에 따라 동작 분리)
 const handleImageClick = async (index, item) => {
   if (isDeleteMode.value) {
-    // 삭제 모드일 때는 삭제 진행
     if (confirm(`'${item.title}' 사진을 영구적으로 삭제하시겠습니까?`)) {
       try {
         const response = await fetch(`/api/images/${index}`, { method: 'DELETE' });
@@ -139,7 +142,6 @@ const handleImageClick = async (index, item) => {
       }
     }
   } else {
-    // 삭제 모드가 아닐 때는 중앙 포커스 모드로 띄우기
     focusedIndex.value = index;
   }
 };
@@ -149,12 +151,18 @@ const closeFocus = () => {
 };
 
 onMounted(() => {
-  fetchImages();
+  fetchImages(); 
   window.addEventListener('keydown', handleKeyDown);
+  pollingInterval = setInterval(() => {
+    fetchImages();
+  }, 3000);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
+  if (pollingInterval) {
+    clearInterval(pollingInterval);
+  }
 });
 
 const handleFileChange = (event) => {
@@ -174,6 +182,7 @@ const clearPreview = () => {
   previewImageUrl.value = null;
 };
 
+// 🚀 업로드 애니메이션 프레임 보장 로직
 const handleUpload = async () => {
   if (!selectedFile.value || !uploadTitle.value) return;
 
@@ -190,11 +199,21 @@ const handleUpload = async () => {
 
     if (response.ok) {
       const newImage = await response.json();
-      images.value.push(newImage);
-      uploadTitle.value = '';
-      selectedFile.value = null;
-      clearPreview();
-      if (fileInput.value) fileInput.value.value = ''; 
+      
+      // 1. 배열을 통째로 갱신하여 확실한 반응형 트리거를 일으킴
+      images.value = [...images.value, newImage];
+      
+      // 2. DOM 업데이트가 완료될 때까지 기다려 애니메이션 렌더링 엔진 가동
+      await nextTick();
+      
+      // 3. 약간의 지연(50ms)을 주어 레이아웃 재배치로 인한 프레임 씹힘 방지
+      setTimeout(() => {
+        uploadTitle.value = '';
+        selectedFile.value = null;
+        clearPreview();
+        if (fileInput.value) fileInput.value.value = ''; 
+      }, 50);
+
     } else {
       alert('업로드에 실패했습니다.');
     }
@@ -208,6 +227,17 @@ const handleUpload = async () => {
 </script>
 
 <style scoped>
+/* 🚀 CSS 우선순위 강제(!important)를 통해 애니메이션 씹힘 방지 */
+.grid-container > .fade-slide-enter-active,
+.grid-container > .fade-slide-leave-active {
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+}
+.grid-container > .fade-slide-enter-from,
+.grid-container > .fade-slide-leave-to {
+  opacity: 0 !important;
+  transform: translateY(30px) scale(0.9) !important;
+}
+
 .gallery-container {
   display: flex;
   height: 100vh;
@@ -215,16 +245,16 @@ const handleUpload = async () => {
   font-family: 'Arial', sans-serif;
   box-sizing: border-box;
   position: relative;
+  background-color: #f0f2f5;
 }
 
-/* 🚀 중앙 집중형 모달 오버레이 스타일 */
 .focused-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(30, 30, 30, 0.85); /* 짙은 회색으로 배경 딤 처리 */
+  background-color: rgba(0, 0, 0, 0.85); 
   z-index: 100; 
   display: flex;
   justify-content: center;
@@ -232,63 +262,66 @@ const handleUpload = async () => {
   animation: fadeIn 0.2s ease-out forwards;
 }
 
-/* 🚀 화면을 다 덮을 정도로 커지는 모달 카드 애니메이션 */
 .focused-card {
-  background: #fff;
-  border-radius: 12px;
-  width: 90vw;
-  height: 90vh;
-  max-width: 1400px;
+  background: transparent;
+  width: 95vw;
+  height: 95vh;
+  max-width: 1600px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 25px 50px rgba(0,0,0,0.5);
   position: relative;
   animation: zoomIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
 .focused-image-wrapper {
   flex: 1;
-  background-color: #111;
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
 }
 
 .focused-image-wrapper img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain; /* 원본 비율 유지하며 화면 꽉 차게 */
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain; 
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 
 .focused-title {
-  padding: 20px;
-  text-align: center;
-  font-size: 1.8rem;
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  font-size: 1.5rem;
   font-weight: bold;
-  color: #333;
-  background: #fff;
+  color: #fff;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  border-radius: 30px;
 }
 
 .close-btn {
   position: absolute;
   top: 20px;
   right: 20px;
-  background: rgba(0,0,0,0.6);
+  background: rgba(255,255,255,0.2);
   color: white;
   border: none;
   border-radius: 50%;
-  width: 45px;
-  height: 45px;
+  width: 50px;
+  height: 50px;
   font-size: 1.5rem;
   cursor: pointer;
   z-index: 10;
   transition: background 0.2s;
+  backdrop-filter: blur(4px);
 }
 
 .close-btn:hover {
-  background: rgba(255, 71, 87, 0.9);
+  background: #e60023;
 }
 
 @keyframes fadeIn {
@@ -297,15 +330,13 @@ const handleUpload = async () => {
 }
 
 @keyframes zoomIn {
-  from { transform: scale(0.6); opacity: 0; }
+  from { transform: scale(0.9); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
 
 .gallery-section {
   width: 70%;
-  padding: 30px;
-  background-color: #f8f9fa;
-  border-right: 1px solid #ddd;
+  padding: 20px;
   overflow-y: auto; 
 }
 
@@ -313,74 +344,69 @@ const handleUpload = async () => {
   width: 30%;
   padding: 30px;
   background-color: #ffffff;
+  border-left: 1px solid #ddd;
+  box-shadow: -2px 0 10px rgba(0,0,0,0.05);
+  z-index: 5;
 }
 
 .section-title {
   margin-bottom: 20px;
   font-size: 1.5rem;
   font-weight: bold;
-  color: #333;
+  color: #111;
   display: flex;
   align-items: center;
+  padding-left: 10px;
 }
 
 .delete-badge {
-  font-size: 0.9rem;
-  background-color: #ff4757;
+  font-size: 0.8rem;
+  background-color: #111;
   color: white;
   padding: 4px 10px;
   border-radius: 20px;
   margin-left: 10px;
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.05); opacity: 0.8; }
-  100% { transform: scale(1); opacity: 1; }
 }
 
 .grid-container {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  display: block;
+  column-count: 4;
+  column-gap: 16px;
+  padding: 10px;
 }
 
 .image-card {
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 16px;
   position: relative;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: filter 0.2s;
   cursor: pointer;
+  break-inside: avoid;
 }
 
-/* 마우스 호버 시 살짝 반응만 하도록 유지 */
 .image-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+  filter: brightness(0.9);
 }
 
 .image-card.is-delete-mode {
-  border: 2px dashed #ff4757;
+  border: 3px solid #e60023;
 }
 
 .image-wrapper {
   width: 100%;
-  padding-top: 100%; 
-  position: relative;
+  padding-top: 0 !important; 
 }
 
 .image-wrapper img {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: static !important;
   width: 100%;
-  height: 100%;
-  object-fit: cover; 
+  height: auto;
+  display: block;
 }
 
 .delete-overlay {
@@ -389,7 +415,7 @@ const handleUpload = async () => {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(255, 71, 87, 0.6);
+  background-color: rgba(230, 0, 35, 0.7);
   color: white;
   display: flex;
   justify-content: center;
@@ -399,14 +425,12 @@ const handleUpload = async () => {
 }
 
 .image-title {
-  padding: 12px;
-  text-align: center;
-  font-weight: 500;
-  color: #444;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  background-color: #fff;
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #111;
+  word-break: break-all;
 }
 
 .upload-form {
@@ -423,34 +447,31 @@ const handleUpload = async () => {
 
 .form-group label {
   font-weight: 600;
-  color: #555;
+  color: #333;
 }
 
 .form-group input[type="text"] {
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 12px;
+  border: 2px solid #ddd;
+  border-radius: 16px;
   font-size: 1rem;
+  transition: border-color 0.2s;
 }
 
-.form-group input[type="file"] {
-  padding: 10px 0;
-}
-
-.preview-area {
-  margin-top: 10px;
+.form-group input[type="text"]:focus {
+  outline: none;
+  border-color: #0084ff;
 }
 
 .preview-image-wrapper {
   width: 100%;
   max-height: 200px; 
-  border-radius: 4px;
-  border: 1px solid #ddd;
+  border-radius: 16px;
+  border: 2px dashed #ddd;
   overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: #f9f9f9;
 }
 
 .preview-image {
@@ -460,11 +481,11 @@ const handleUpload = async () => {
 }
 
 .submit-btn {
-  padding: 12px;
-  background-color: #007bff;
+  padding: 14px;
+  background-color: #e60023;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 24px;
   font-size: 1rem;
   font-weight: bold;
   cursor: pointer;
@@ -472,28 +493,30 @@ const handleUpload = async () => {
 }
 
 .submit-btn:hover:not(:disabled) {
-  background-color: #0056b3;
+  background-color: #ad081b;
 }
 
 .submit-btn:disabled {
-  background-color: #cccccc;
+  background-color: #efefef;
+  color: #a7a7a7;
   cursor: not-allowed;
 }
 
 .empty-state {
   text-align: center;
   padding: 50px;
-  color: #888;
+  color: #767676;
   font-size: 1.1rem;
 }
 
 .shortcut-info {
   margin-top: 25px;
   padding: 15px;
-  background-color: #f1f3f5;
-  border-radius: 8px;
-  color: #555;
+  background-color: #efefef;
+  border-radius: 16px;
+  color: #111;
   font-size: 0.9rem;
   text-align: center;
+  font-weight: 500;
 }
 </style>
