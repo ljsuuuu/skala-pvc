@@ -22,3 +22,5 @@ frontend/*.local
 backend/data/
 
 k8s/ingress.yaml
+.DS_Store
+**/.DS_Store
