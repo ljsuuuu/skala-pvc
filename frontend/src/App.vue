@@ -18,7 +18,7 @@
       </h2>
       
       <div v-if="images.length === 0" class="empty-state">
-        오른쪽에서 첫 번째 이미지를 업로드해 보세요!
+        오른쪽 아래 '사진 업로드' 버튼을 눌러 첫 이미지를 올려보세요!
       </div>
 
       <transition-group 
@@ -44,7 +44,15 @@
       </transition-group>
     </div>
 
-    <div class="upload-section">
+    <button 
+      class="upload-toggle-fab" 
+      @click="toggleUploadPanel"
+      :class="{ 'is-open': isUploadPanelOpen }"
+    >
+      {{ isUploadPanelOpen ? '✕ 닫기' : '📤 사진 업로드' }}
+    </button>
+
+    <div class="upload-section" :class="{ 'is-open': isUploadPanelOpen }">
       <h2 class="section-title">📤 사진 업로드</h2>
       
       <form @submit.prevent="handleUpload" class="upload-form">
@@ -84,11 +92,17 @@
       </form>
       
     </div>
+
+    <div 
+      class="panel-backdrop" 
+      :class="{ 'is-active': isUploadPanelOpen }" 
+      @click="toggleUploadPanel"
+    ></div>
+
   </div>
 </template>
 
 <script setup>
-// 🚀 nextTick 추가
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 
 const images = ref([]); 
@@ -102,13 +116,21 @@ const focusedIndex = ref(null);
 const isDeleteMode = ref(false);
 let pollingInterval = null; 
 
+const isUploadPanelOpen = ref(false);
+
+const toggleUploadPanel = () => {
+  isUploadPanelOpen.value = !isUploadPanelOpen.value;
+};
+
 const fetchImages = async () => {
   try {
     const response = await fetch('/api/images');
     if (response.ok) {
       const newData = await response.json();
-      if (images.value.length !== newData.length) {
-        images.value = newData;
+      const reversedData = newData.reverse();
+      
+      if (images.value.length !== reversedData.length) {
+        images.value = reversedData;
       }
     }
   } catch (error) {
@@ -131,7 +153,8 @@ const handleImageClick = async (index, item) => {
   if (isDeleteMode.value) {
     if (confirm(`'${item.title}' 사진을 영구적으로 삭제하시겠습니까?`)) {
       try {
-        const response = await fetch(`/api/images/${index}`, { method: 'DELETE' });
+        const realBackendIndex = images.value.length - 1 - index;
+        const response = await fetch(`/api/images/${realBackendIndex}`, { method: 'DELETE' });
         if (response.ok) {
           images.value.splice(index, 1);
         } else {
@@ -182,7 +205,6 @@ const clearPreview = () => {
   previewImageUrl.value = null;
 };
 
-// 🚀 업로드 애니메이션 프레임 보장 로직
 const handleUpload = async () => {
   if (!selectedFile.value || !uploadTitle.value) return;
 
@@ -200,18 +222,17 @@ const handleUpload = async () => {
     if (response.ok) {
       const newImage = await response.json();
       
-      // 1. 배열을 통째로 갱신하여 확실한 반응형 트리거를 일으킴
-      images.value = [...images.value, newImage];
+      images.value = [newImage, ...images.value];
       
-      // 2. DOM 업데이트가 완료될 때까지 기다려 애니메이션 렌더링 엔진 가동
       await nextTick();
       
-      // 3. 약간의 지연(50ms)을 주어 레이아웃 재배치로 인한 프레임 씹힘 방지
       setTimeout(() => {
         uploadTitle.value = '';
         selectedFile.value = null;
         clearPreview();
         if (fileInput.value) fileInput.value.value = ''; 
+        
+        isUploadPanelOpen.value = false;
       }, 50);
 
     } else {
@@ -227,7 +248,6 @@ const handleUpload = async () => {
 </script>
 
 <style scoped>
-/* 🚀 CSS 우선순위 강제(!important)를 통해 애니메이션 씹힘 방지 */
 .grid-container > .fade-slide-enter-active,
 .grid-container > .fade-slide-leave-active {
   transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
@@ -246,6 +266,85 @@ const handleUpload = async () => {
   box-sizing: border-box;
   position: relative;
   background-color: #f0f2f5;
+  overflow: hidden; 
+}
+
+.gallery-section {
+  width: 100%;
+  padding: 20px 30px;
+  overflow-y: auto; 
+  transition: filter 0.3s;
+}
+
+/* 🚀 토글 버튼 크기 고정 및 내용 중앙 정렬 */
+.upload-toggle-fab {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 160px; /* 고정 너비 지정 */
+  height: 54px; /* 고정 높이 지정 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #111;
+  color: white;
+  border: none;
+  border-radius: 30px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  z-index: 60; 
+  /* 버튼에도 출렁거리는 효과 제거하고 부드러운 전환으로 변경 */
+  transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.upload-toggle-fab:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 12px 25px rgba(0,0,0,0.4);
+}
+
+.upload-toggle-fab.is-open {
+  background-color: #e60023; 
+}
+
+/* 🚀 슬라이드 애니메이션 수정: 바운스 없이 벽에 착 붙도록 변경 */
+.upload-section {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 400px; 
+  height: 100vh;
+  background-color: #ffffff;
+  padding: 40px 30px;
+  box-shadow: -5px 0 25px rgba(0,0,0,0.1);
+  z-index: 50; 
+  
+  transform: translateX(100%);
+  transition: transform 0.3s ease-out; /* cubic-bezier 제거, ease-out 적용 */
+  overflow-y: auto;
+}
+
+.upload-section.is-open {
+  transform: translateX(0);
+}
+
+.panel-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0,0,0,0.3);
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none; 
+  transition: opacity 0.3s;
+}
+
+.panel-backdrop.is-active {
+  opacity: 1;
+  pointer-events: auto; 
 }
 
 .focused-modal-overlay {
@@ -279,11 +378,13 @@ const handleUpload = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
+  min-height: 0; 
+  overflow: hidden; 
 }
 
 .focused-image-wrapper img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%; 
+  height: 100%; 
   object-fit: contain; 
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -334,23 +435,8 @@ const handleUpload = async () => {
   to { transform: scale(1); opacity: 1; }
 }
 
-.gallery-section {
-  width: 70%;
-  padding: 20px;
-  overflow-y: auto; 
-}
-
-.upload-section {
-  width: 30%;
-  padding: 30px;
-  background-color: #ffffff;
-  border-left: 1px solid #ddd;
-  box-shadow: -2px 0 10px rgba(0,0,0,0.05);
-  z-index: 5;
-}
-
 .section-title {
-  margin-bottom: 20px;
+  margin-bottom: 25px;
   font-size: 1.5rem;
   font-weight: bold;
   color: #111;
@@ -368,9 +454,10 @@ const handleUpload = async () => {
   margin-left: 10px;
 }
 
+/* 🚀 행당 사진 개수 4 -> 6으로 변경 */
 .grid-container {
   display: block;
-  column-count: 4;
+  column-count: 6; 
   column-gap: 16px;
   padding: 10px;
 }
@@ -507,16 +594,5 @@ const handleUpload = async () => {
   padding: 50px;
   color: #767676;
   font-size: 1.1rem;
-}
-
-.shortcut-info {
-  margin-top: 25px;
-  padding: 15px;
-  background-color: #efefef;
-  border-radius: 16px;
-  color: #111;
-  font-size: 0.9rem;
-  text-align: center;
-  font-weight: 500;
 }
 </style>
